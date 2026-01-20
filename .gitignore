@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Data files (large)
+data/*.csv
+*.parquet
+*.json
+*.gz
+
+# Output files
+output/
+results/
+*.png
+*.jpg
+*.pdf
+tableau_data.csv
+
+# Spark
+spark-warehouse/
+metastore_db/
+derby.log
+*.log
+
+# Hive
+*.hiverc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+docker-compose.override.yml
+
+# Keep data directory structure but ignore files
+!data/.gitkeep
+!output/.gitkeep
