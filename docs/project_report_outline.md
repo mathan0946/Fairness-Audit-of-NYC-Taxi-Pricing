@@ -114,7 +114,7 @@ This project addresses this gap with comprehensive analysis.
 │                            │                                 │
 │                            ▼                                 │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │                  APACHE HIVE                           │  │
+│  │                  APACHE HIVE                           │  │i have
 │  │  Structured SQL querying on distributed data          │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                            │                                 │

@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # ─────────── HDFS NameNode ───────────
   namenode:
     image: apache/hadoop:3
     container_name: hadoop-namenode
@@ -20,6 +21,7 @@ services:
     networks:
       - hadoop-network
 
+  # ─────────── HDFS DataNode ───────────
   datanode:
     image: apache/hadoop:3
     container_name: hadoop-datanode
@@ -38,6 +40,7 @@ services:
     networks:
       - hadoop-network
 
+  # ─────────── YARN ResourceManager ───────────
   resourcemanager:
     image: apache/hadoop:3
     container_name: hadoop-resourcemanager
@@ -52,6 +55,7 @@ services:
     networks:
       - hadoop-network
 
+  # ─────────── YARN NodeManager ───────────
   nodemanager:
     image: apache/hadoop:3
     container_name: hadoop-nodemanager
@@ -61,6 +65,43 @@ services:
       - ./hadoop.env
     depends_on:
       - resourcemanager
+    networks:
+      - hadoop-network
+
+  # ─────────── Hive Metastore (Derby-backed) ───────────
+  hive-metastore:
+    image: apache/hive:4.0.1
+    container_name: hive-metastore
+    hostname: hive-metastore
+    ports:
+      - "9083:9083"   # Thrift Metastore
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: derby
+      HIVE_METASTORE_WAREHOUSE_DIR: hdfs://namenode:9000/user/hive/warehouse
+    env_file:
+      - ./hadoop.env
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - hadoop-network
+
+  # ─────────── HiveServer2 (JDBC / Beeline) ───────────
+  hiveserver2:
+    image: apache/hive:4.0.1
+    container_name: hiveserver2
+    hostname: hiveserver2
+    ports:
+      - "10000:10000" # JDBC
+      - "10002:10002" # HiveServer2 Web UI
+    environment:
+      SERVICE_NAME: hiveserver2
+      HIVE_METASTORE_URIS: thrift://hive-metastore:9083
+    env_file:
+      - ./hadoop.env
+    depends_on:
+      - hive-metastore
     networks:
       - hadoop-network
 
