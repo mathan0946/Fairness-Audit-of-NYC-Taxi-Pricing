@@ -1,114 +1,101 @@
-version: '3.8'
+# ================================================================
+# NYC Taxi Fairness Audit – Docker Compose
+# ================================================================
+# HDFS cluster (namenode, datanode, resourcemanager, nodemanager,
+# historyserver) runs on the pre-existing "mathan_hadoop" network.
+# Start those containers with:
+#   docker start namenode datanode resourcemanager nodemanager historyserver
+#
+# This compose file manages ONLY the add-on services:
+#   • Apache Hive  (metastore + hiveserver2)
+#   • Apache Kafka (zookeeper + broker)
+# ================================================================
 
 services:
-  # ─────────── HDFS NameNode ───────────
-  namenode:
-    image: apache/hadoop:3
-    container_name: hadoop-namenode
-    hostname: namenode
-    command: ["hdfs", "namenode"]
-    ports:
-      - "9870:9870"   # HDFS Web UI
-      - "9000:9000"   # HDFS RPC
-    environment:
-      ENSURE_NAMENODE_DIR: "/tmp/hadoop-root/dfs/name"
-      HADOOP_HOME: "/opt/hadoop"
-    env_file:
-      - ./hadoop.env
-    volumes:
-      - hadoop_namenode:/tmp/hadoop-root/dfs/name
-      - ./data:/data
-    networks:
-      - hadoop-network
 
-  # ─────────── HDFS DataNode ───────────
-  datanode:
-    image: apache/hadoop:3
-    container_name: hadoop-datanode
-    hostname: datanode
-    command: ["hdfs", "datanode"]
-    ports:
-      - "9864:9864"   # DataNode Web UI
-    environment:
-      HADOOP_HOME: "/opt/hadoop"
-    env_file:
-      - ./hadoop.env
-    volumes:
-      - hadoop_datanode:/tmp/hadoop-root/dfs/data
-    depends_on:
-      - namenode
-    networks:
-      - hadoop-network
+  # ═══════════════════════════════════════════════
+  #  APACHE HIVE  (Metastore + HiveServer2)
+  # ═══════════════════════════════════════════════
 
-  # ─────────── YARN ResourceManager ───────────
-  resourcemanager:
-    image: apache/hadoop:3
-    container_name: hadoop-resourcemanager
-    hostname: resourcemanager
-    command: ["yarn", "resourcemanager"]
-    ports:
-      - "8088:8088"   # YARN Web UI
-    env_file:
-      - ./hadoop.env
-    depends_on:
-      - namenode
-    networks:
-      - hadoop-network
-
-  # ─────────── YARN NodeManager ───────────
-  nodemanager:
-    image: apache/hadoop:3
-    container_name: hadoop-nodemanager
-    hostname: nodemanager
-    command: ["yarn", "nodemanager"]
-    env_file:
-      - ./hadoop.env
-    depends_on:
-      - resourcemanager
-    networks:
-      - hadoop-network
-
-  # ─────────── Hive Metastore (Derby-backed) ───────────
   hive-metastore:
     image: apache/hive:4.0.1
     container_name: hive-metastore
     hostname: hive-metastore
+    restart: unless-stopped
     ports:
       - "9083:9083"   # Thrift Metastore
     environment:
       SERVICE_NAME: metastore
       DB_DRIVER: derby
-      HIVE_METASTORE_WAREHOUSE_DIR: hdfs://namenode:9000/user/hive/warehouse
-    env_file:
-      - ./hadoop.env
-    depends_on:
-      - namenode
-      - datanode
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+    volumes:
+      - hive_metastore_db:/opt/hive/data/derby
+      - ./hive/hive-site.xml:/hive_custom_conf/hive-site.xml:ro
     networks:
       - hadoop-network
 
-  # ─────────── HiveServer2 (JDBC / Beeline) ───────────
   hiveserver2:
     image: apache/hive:4.0.1
     container_name: hiveserver2
     hostname: hiveserver2
+    restart: unless-stopped
     ports:
-      - "10000:10000" # JDBC
+      - "10000:10000" # JDBC / Beeline
       - "10002:10002" # HiveServer2 Web UI
     environment:
       SERVICE_NAME: hiveserver2
-      HIVE_METASTORE_URIS: thrift://hive-metastore:9083
-    env_file:
-      - ./hadoop.env
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+    volumes:
+      - ./hive/hive-site.xml:/hive_custom_conf/hive-site.xml:ro
+      - ./hive:/hive_scripts:ro
     depends_on:
       - hive-metastore
     networks:
       - hadoop-network
 
+  # ═══════════════════════════════════════════════
+  #  APACHE KAFKA  (Zookeeper + Broker)
+  #  Simulates real-time taxi trip streaming
+  # ═══════════════════════════════════════════════
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    hostname: zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - hadoop-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    hostname: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"   # External listener
+      - "29092:29092"  # Internal listener
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    networks:
+      - hadoop-network
+
 volumes:
-  hadoop_namenode:
-  hadoop_datanode:
+  hive_metastore_db:
 
 networks:
   hadoop-network:
-    driver: bridge
+    name: mathan_hadoop
+    external: true

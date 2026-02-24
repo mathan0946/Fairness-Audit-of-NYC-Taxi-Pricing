@@ -10,13 +10,18 @@
 
 This project investigates whether machine-learning pricing models for NYC taxi trips exhibit **algorithmic bias** against passengers in low-income neighborhoods. We train two Random Forest regressors — a **Baseline** model (that includes median household income as a feature) and a **Fair** model (that excludes it) — then quantify the bias using three academic fairness metrics and estimate annual financial impact.
 
-### Key Findings
+### Key Findings (Actual Pipeline Results)
 
-| Metric | Baseline Model | Fair Model | Improvement |
+| Metric | Baseline Model | Fair Model | Delta |
 |---|---|---|---|
-| Low-income overcharge | ~23 % | ~2 % | **91 %** ↓ |
-| R² accuracy | ~85 % | ~83 % | only 2 pp loss |
-| Demographic Parity σ | high | low | significant |
+| R² accuracy | **94.85%** | **94.82%** | only 0.03 pp loss |
+| RMSE | $2.23 | $2.24 | — |
+| MAE | $0.67 | $0.66 | — |
+| Low-income overcharge | +0.3% | −0.2% | **bias eliminated** |
+| Income feature importance | 3.67% | removed | — |
+| Demographic Parity σ | 3.11 | 3.05 | 2.1% improvement |
+| Annual financial impact | ~$165K | eliminated | — |
+| Records processed | 46M cleaned → 41M enriched → 2M sampled for ML | | |
 
 ---
 
@@ -28,10 +33,11 @@ This project investigates whether machine-learning pricing models for NYC taxi t
 | **Spark SQL** | 4.1.1 | Structured queries, Parquet I/O |
 | **Spark MLlib** | 4.1.1 | Random Forest, VectorAssembler, StandardScaler, RegressionEvaluator |
 | **Apache Hive** | 4.0.1 | DDL schema over HDFS, analytical views |
-| **Hadoop HDFS** | 3 | Distributed storage (Docker cluster) |
+| **Apache Kafka** | 7.6 (Confluent) | Real-time taxi trip stream simulation |
+| **Hadoop HDFS** | 3.2.1 (bde2020) | Distributed storage (Docker cluster) |
 | **Scala** | 2.13.17 | All Spark processing scripts |
 | **Python** | 3.12 | scipy stats, matplotlib/seaborn visualisations |
-| **Docker** | — | Hadoop + Hive cluster (namenode, datanode, RM, NM, metastore, hiveserver2) |
+| **Docker** | — | Hadoop + Hive + Kafka cluster |
 
 ---
 
@@ -62,6 +68,9 @@ prj/
 │   ├── bias_analysis/
 │   │   ├── 01_bias_detection.py      # Stage 4A – t-tests, Cohen's d
 │   │   └── 02_fairness_metrics.py    # Stage 4B – DP, EO, IF metrics
+│   ├── kafka/
+│   │   ├── kafka_producer.py          # Stream taxi CSV → Kafka topic
+│   │   └── kafka_consumer.py          # Consume Kafka → JSON-lines files
 │   └── visualizations/
 │       └── generate_all_plots.py     # Stage 5 – 6 charts + Tableau export
 │
@@ -111,14 +120,16 @@ prj/
 - Broadcast join with US Census income data
 - Income categorisation: **high** (≥ $75K), **medium** (≥ $45K), **low** (< $45K)
 - Fallback to $60,000 NYC median for unmatched ZIPs
-- Output: 40-partition Snappy Parquet → `output/processed/taxi_enriched/`
+- Census data deduplicated by ZIP (avg income per unique ZIP)
+- Output: 20-partition Snappy Parquet → `output/processed/taxi_enriched/`
 
 ### Stage 3 – ML Pipeline + Bias Analysis (Scala / Spark MLlib)
 **Script:** `scripts/scala/03_MLPipeline.scala`
 
 - **Spark ML Pipeline**: VectorAssembler → StandardScaler (both feature sets)
-- **Baseline Random Forest**: 100 trees, max-depth 10, features include `median_income`
+- **Baseline Random Forest**: 50 trees, max-depth 8, features include `median_income`
 - **Fair Random Forest**: same hyper-params, features exclude income/location
+- **5% stratified sample** (~2M records) for tractable local training
 - RegressionEvaluator: R², RMSE, MAE
 - Feature importance ranking
 - Bias analysis by income category + controlled-distance analysis
@@ -182,13 +193,31 @@ REM Stage 5 – Visualizations
 python scripts/visualizations/generate_all_plots.py
 ```
 
-### Hive Tables (Docker required)
+### Docker Services (HDFS + Hive + Kafka)
 ```bash
-docker-compose up -d
-# Wait for services to start, then:
-docker exec -it hiveserver2 beeline -u jdbc:hive2://localhost:10000
-# Run: source hive/create_tables.hql
+# 1. Start HDFS cluster (pre-existing bde2020 containers)
+docker start namenode datanode resourcemanager nodemanager historyserver
+
+# 2. Start Hive + Kafka (compose manages these)
+cd "N:\CAI\sem 6\BGA\prj"
+docker compose up -d
+
+# 3. Create Hive tables (wait ~90s for HiveServer2 to start)
+docker exec hiveserver2 beeline -u "jdbc:hive2://localhost:10000" -f /hive_scripts/create_tables.hql
+
+# 4. Kafka streaming simulation
+python scripts/kafka/kafka_producer.py --rate 500 --limit 5000
+python scripts/kafka/kafka_consumer.py --output output/kafka_ingest
 ```
+
+### Service Endpoints
+| Service | URL |
+|---|---|
+| HDFS NameNode UI | http://localhost:9870 |
+| YARN Resource Manager | http://localhost:8088 |
+| HiveServer2 (Beeline/JDBC) | jdbc:hive2://localhost:10000 |
+| HiveServer2 Web UI | http://localhost:10002 |
+| Kafka Broker | localhost:9092 |
 
 ---
 
@@ -217,11 +246,14 @@ docker exec -it hiveserver2 beeline -u jdbc:hive2://localhost:10000
 │                    SCHEMA LAYER                          │
 │  Apache Hive (DDL, views, queries)                      │
 ├─────────────────────────────────────────────────────────┤
+│                    STREAMING LAYER                       │
+│  Apache Kafka (real-time trip simulation)                │
+├─────────────────────────────────────────────────────────┤
 │                    STORAGE LAYER                         │
 │  Hadoop HDFS  │  Parquet (Snappy)  │  CSV                │
 ├─────────────────────────────────────────────────────────┤
 │                    INFRASTRUCTURE                        │
-│  Docker (Hadoop cluster)  │  Spark 4.1.1 (local/YARN)   │
+│  Docker (Hadoop + Hive + Kafka)  │  Spark 4.1.1         │
 └─────────────────────────────────────────────────────────┘
 ```
 

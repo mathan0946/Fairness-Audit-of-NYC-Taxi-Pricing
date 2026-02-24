@@ -77,10 +77,11 @@ echo ======================================================================
 echo.
 echo   Frameworks Used:
 echo     - Apache Spark 4.1.1  (Spark SQL, Spark ML Pipeline, MLlib)
-echo     - Apache Hive         (DDL in hive/create_tables.hql)
-echo     - Hadoop HDFS         (distributed storage)
+echo     - Apache Hive 4.0.1   (DDL in hive/create_tables.hql)
+echo     - Apache Kafka 7.6    (streaming simulation)
+echo     - Hadoop HDFS 3.2.1   (distributed storage, bde2020)
 echo     - Scala 2.13          (all Spark scripts)
-echo     - Python 3.12         (scipy stats, matplotlib viz)
+echo     - Python 3.12         (scipy stats, matplotlib viz, kafka)
 echo.
 echo   Output Artifacts:
 echo     output/processed/taxi_cleaned/     cleaned Parquet (Snappy)
@@ -91,5 +92,10 @@ echo     output/results/predictions/        all predictions Parquet
 echo     output/results/bias_analysis/      CSV + JSON reports
 echo     output/results/fairness_metrics/   JSON report
 echo     output/visualizations/             6 PNG charts + Tableau CSV
+echo.
+echo   Docker Services (docker compose up -d):
+echo     HDFS     : namenode(9870) datanode(9864) YARN(8088)
+echo     Hive     : metastore(9083) hiveserver2(10000,10002)
+echo     Kafka    : zookeeper(2181) broker(9092)
 echo ======================================================================
 pause

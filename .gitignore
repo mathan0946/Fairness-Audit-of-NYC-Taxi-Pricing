@@ -24,6 +24,7 @@ data/*.zip
 output/processed/
 output/models/
 output/results/
+output/kafka_ingest/
 output/visualizations/*.png
 output/visualizations/*.jpg
 output/visualizations/tableau_data.csv

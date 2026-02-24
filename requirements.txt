@@ -29,6 +29,9 @@ ipykernel>=6.22.0
 # Progress bars
 tqdm>=4.65.0
 
+# Kafka streaming
+kafka-python-ng>=2.2.0
+
 # File handling
 openpyxl>=3.1.0
 
