@@ -32,6 +32,9 @@ tqdm>=4.65.0
 # Kafka streaming
 kafka-python-ng>=2.2.0
 
+# Web Dashboard
+flask>=3.0.0
+
 # File handling
 openpyxl>=3.1.0
 

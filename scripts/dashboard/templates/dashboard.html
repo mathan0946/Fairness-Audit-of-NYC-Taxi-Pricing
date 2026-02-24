@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NYC Taxi Fairness Audit – Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --accent: #0dcaf0;
+            --accent2: #6f42c1;
+            --success-g: #198754;
+            --danger-r: #dc3545;
+            --warn-y: #ffc107;
+        }
+        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .navbar { background: linear-gradient(135deg, #161b22 0%, #0d1117 100%); border-bottom: 1px solid #30363d; }
+        .navbar-brand { font-weight: 700; letter-spacing: .5px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; }
+        .card-header { background: transparent; border-bottom: 1px solid #30363d; font-weight: 600; }
+        .stat-card { text-align: center; padding: 1.25rem; transition: transform .15s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-value { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+        .stat-label { font-size: .8rem; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; margin-top: .25rem; }
+        .badge-pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+        .live-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .live-dot.on  { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+        .live-dot.off { background: #f85149; }
+        .trip-feed { max-height: 280px; overflow-y: auto; font-size: .82rem; }
+        .trip-feed table td { padding: .35rem .5rem; border-color: #21262d; }
+        .chart-container { position: relative; height: 280px; }
+        .arch-layer { padding: .5rem .75rem; margin-bottom: 4px; border-radius: 6px; font-size: .85rem; font-weight: 500; text-align: center; }
+        .section-title { font-size: 1.1rem; font-weight: 700; margin-bottom: .75rem; display: flex; align-items: center; gap: .5rem; }
+        .rec-item { background: #1c2333; border: 1px solid #30363d; border-radius: 8px; padding: .6rem .8rem; margin-bottom: .4rem; font-size: .85rem; }
+        .metric-row { display: flex; justify-content: space-between; padding: .4rem 0; border-bottom: 1px solid #21262d; font-size: .88rem; }
+        .metric-row:last-child { border-bottom: none; }
+        .tab-content { padding-top: 1rem; }
+        .nav-pills .nav-link { color: #8b949e; border-radius: 8px; font-size: .85rem; }
+        .nav-pills .nav-link.active { background: var(--accent); color: #000; font-weight: 600; }
+        .btn-kafka { border-radius: 8px; font-weight: 600; }
+        footer { border-top: 1px solid #30363d; color: #484f58; font-size: .8rem; }
+        .improvement { color: #3fb950; }
+        .regression { color: #f85149; }
+        .neutral { color: #8b949e; }
+    </style>
+</head>
+<body>
+
+<!-- ═══ NAVBAR ═══ -->
+<nav class="navbar navbar-expand-lg sticky-top">
+    <div class="container-fluid">
+        <span class="navbar-brand text-info">
+            <i class="bi bi-taxi-front-fill me-2"></i>NYC Taxi Fairness Audit
+        </span>
+        <div class="d-flex align-items-center gap-3">
+            <span id="kafkaStatus" class="badge bg-secondary">
+                <span class="live-dot off" id="kafkaDot"></span>Kafka: Checking...
+            </span>
+            <span class="badge bg-dark border border-secondary">
+                <i class="bi bi-clock me-1"></i><span id="clock"></span>
+            </span>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid px-4 py-3">
+
+<!-- ═══ ROW 1: KPI CARDS ═══ -->
+<div class="row g-3 mb-3">
+    <div class="col-lg-2 col-md-4 col-6">
+        <div class="card stat-card">
+            <div class="stat-value text-info">94.85%</div>
+            <div class="stat-label">Baseline R²</div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6">
+        <div class="card stat-card">
+            <div class="stat-value text-success">94.82%</div>
+            <div class="stat-label">Fair Model R²</div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6">
+        <div class="card stat-card">
+            <div class="stat-value text-warning">0.03pp</div>
+            <div class="stat-label">Accuracy Loss</div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6">
+        <div class="card stat-card">
+            <div class="stat-value text-danger">+0.3%</div>
+            <div class="stat-label">Low-Income Bias</div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6">
+        <div class="card stat-card">
+            <div class="stat-value improvement">−0.2%</div>
+            <div class="stat-label">Fair Model Bias</div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6">
+        <div class="card stat-card">
+            <div class="stat-value text-info" id="kafkaMsgCount">0</div>
+            <div class="stat-label">Kafka Messages</div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ ROW 2: KAFKA STREAMING + BIAS CHARTS ═══ -->
+<div class="row g-3 mb-3">
+
+    <!-- Kafka Real-Time Panel -->
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-broadcast me-2"></i>Kafka Real-Time Streaming</span>
+                <span class="badge bg-dark" id="kafkaRate">0 msg/s</span>
+            </div>
+            <div class="card-body">
+                <!-- Producer Controls -->
+                <div class="d-flex gap-2 mb-3">
+                    <button class="btn btn-sm btn-info btn-kafka" id="btnStartProducer" onclick="startProducer()">
+                        <i class="bi bi-play-fill me-1"></i>Start Producer
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger btn-kafka" id="btnStopProducer" onclick="stopProducer()" disabled>
+                        <i class="bi bi-stop-fill me-1"></i>Stop
+                    </button>
+                    <div class="ms-auto d-flex align-items-center gap-2">
+                        <label class="form-label mb-0 text-muted" style="font-size:.8rem">Rate:</label>
+                        <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light" 
+                               id="producerRate" value="500" style="width:80px">
+                        <label class="form-label mb-0 text-muted" style="font-size:.8rem">Limit:</label>
+                        <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light" 
+                               id="producerLimit" value="5000" style="width:80px">
+                    </div>
+                </div>
+
+                <!-- Producer Stats Bar -->
+                <div class="d-flex gap-3 mb-3 p-2 rounded" style="background:#1c2333">
+                    <div class="text-center flex-fill">
+                        <div class="fw-bold text-warning" id="prodSent">0</div>
+                        <div style="font-size:.7rem;color:#8b949e">SENT</div>
+                    </div>
+                    <div class="text-center flex-fill">
+                        <div class="fw-bold text-info" id="prodRate">0</div>
+                        <div style="font-size:.7rem;color:#8b949e">MSG/SEC</div>
+                    </div>
+                    <div class="text-center flex-fill">
+                        <div class="fw-bold text-success" id="consumed">0</div>
+                        <div style="font-size:.7rem;color:#8b949e">CONSUMED</div>
+                    </div>
+                    <div class="text-center flex-fill">
+                        <div class="fw-bold text-danger" id="prodErrors">0</div>
+                        <div style="font-size:.7rem;color:#8b949e">ERRORS</div>
+                    </div>
+                </div>
+
+                <!-- Live Borough Chart -->
+                <div class="chart-container" style="height:200px">
+                    <canvas id="boroughLiveChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bias by Income Category -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-bar-chart me-2"></i>Overcharge % by Income</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="biasIncomeChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Borough Bias -->
+    <div class="col-lg-3">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-geo-alt me-2"></i>Borough Bias</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="boroughBiasChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ ROW 3: FAIRNESS METRICS + MODEL COMPARISON + LIVE FEED ═══ -->
+<div class="row g-3 mb-3">
+
+    <!-- Fairness Metrics -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-shield-check me-2"></i>Fairness Metrics</div>
+            <div class="card-body">
+                <div class="chart-container" style="height:240px">
+                    <canvas id="fairnessRadar"></canvas>
+                </div>
+                <hr class="border-secondary my-2">
+                {% if data.fairness_report %}
+                <div class="metric-row">
+                    <span>Demographic Parity</span>
+                    <span class="{% if data.fairness_report.comparison.demographic_parity > 0 %}improvement{% else %}regression{% endif %}">
+                        {{ "%.1f"|format(data.fairness_report.comparison.demographic_parity) }}%
+                    </span>
+                </div>
+                <div class="metric-row">
+                    <span>Equalized Odds</span>
+                    <span class="{% if data.fairness_report.comparison.equalized_odds > 0 %}improvement{% else %}regression{% endif %}">
+                        {{ "%.1f"|format(data.fairness_report.comparison.equalized_odds) }}%
+                    </span>
+                </div>
+                <div class="metric-row">
+                    <span>Individual Fairness</span>
+                    <span class="{% if data.fairness_report.comparison.individual_fairness > 0 %}improvement{% else %}regression{% endif %}">
+                        {{ "%.1f"|format(data.fairness_report.comparison.individual_fairness) }}%
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Accuracy Comparison -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-graph-up me-2"></i>Model Comparison</div>
+            <div class="card-body">
+                <div class="chart-container" style="height:240px">
+                    <canvas id="modelCompareChart"></canvas>
+                </div>
+                <hr class="border-secondary my-2">
+                {% if data.bias_report %}
+                <div class="metric-row">
+                    <span>Annual Impact</span>
+                    <span class="text-warning">${{ "{:,.0f}".format(data.bias_report.financial_impact.total_annual_impact_usd) }}</span>
+                </div>
+                <div class="metric-row">
+                    <span>Avg Overcharge/Trip</span>
+                    <span class="text-danger">${{ "%.2f"|format(data.bias_report.financial_impact.avg_overcharge_per_trip) }}</span>
+                </div>
+                <div class="metric-row">
+                    <span>Affected Trips/Year</span>
+                    <span class="text-info">{{ "{:,.0f}".format(data.bias_report.financial_impact.affected_trips_annually) }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Trip Feed -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-activity me-2"></i>Live Trip Feed</span>
+                <span class="badge bg-info badge-pulse" id="feedBadge" style="display:none">LIVE</span>
+            </div>
+            <div class="card-body trip-feed p-0">
+                <table class="table table-dark table-sm table-hover mb-0">
+                    <thead style="position:sticky;top:0;background:#161b22">
+                        <tr><th>Time</th><th>Fare</th><th>Dist</th><th>Pax</th><th>Borough</th></tr>
+                    </thead>
+                    <tbody id="tripFeedBody">
+                        <tr><td colspan="5" class="text-center text-muted py-4">
+                            <i class="bi bi-broadcast me-2"></i>Start producer to see live trips
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ ROW 4: FINANCIAL IMPACT + RECOMMENDATIONS + ARCHITECTURE ═══ -->
+<div class="row g-3 mb-3">
+
+    <!-- Neighborhood Impact Map Data -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-pin-map me-2"></i>Neighborhood Impact</div>
+            <div class="card-body p-0">
+                <table class="table table-dark table-sm table-hover mb-0">
+                    <thead><tr><th>Neighborhood</th><th>Borough</th><th>Income</th><th>Bias</th><th>Impact/mo</th></tr></thead>
+                    <tbody>
+                        {% for row in data.tableau_data %}
+                        <tr>
+                            <td>{{ row.neighborhood }}</td>
+                            <td><span class="badge {% if row.borough == 'Manhattan' %}bg-primary{% elif row.borough == 'Brooklyn' %}bg-success{% elif row.borough == 'Bronx' %}bg-danger{% elif row.borough == 'Queens' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ row.borough }}</span></td>
+                            <td>${{ "{:,}".format(row.median_income|int) }}</td>
+                            <td class="{% if row.overcharge_pct|float > 10 %}text-danger{% elif row.overcharge_pct|float > 5 %}text-warning{% else %}text-success{% endif %}">
+                                {{ row.overcharge_pct }}%
+                            </td>
+                            <td>${{ "{:,}".format(row.financial_impact_monthly|int) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recommendations -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-lightbulb me-2"></i>Recommendations</div>
+            <div class="card-body">
+                {% if data.bias_report and data.bias_report.recommendations %}
+                    {% for rec in data.bias_report.recommendations %}
+                    <div class="rec-item">
+                        <i class="bi bi-check-circle text-success me-2"></i>{{ rec }}
+                    </div>
+                    {% endfor %}
+                {% endif %}
+
+                {% if data.bias_report and data.bias_report.statistical_tests %}
+                <hr class="border-secondary my-3">
+                <div class="section-title"><i class="bi bi-calculator"></i> Statistical Tests</div>
+                <div class="metric-row">
+                    <span>Low vs High t-stat</span>
+                    <span>{{ "%.3f"|format(data.bias_report.statistical_tests.low_vs_high.t_stat) }}</span>
+                </div>
+                <div class="metric-row">
+                    <span>p-value</span>
+                    <span class="{% if data.bias_report.statistical_tests.low_vs_high.significant %}text-danger{% else %}text-success{% endif %}">
+                        {{ "%.4f"|format(data.bias_report.statistical_tests.low_vs_high.p_value) }}
+                    </span>
+                </div>
+                <div class="metric-row">
+                    <span>Cohen's d</span>
+                    <span>{{ "%.4f"|format(data.bias_report.statistical_tests.low_vs_high.cohens_d) }} ({{ data.bias_report.statistical_tests.low_vs_high.effect_size }})</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Architecture -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-layers me-2"></i>Pipeline Architecture</div>
+            <div class="card-body">
+                <div class="arch-layer" style="background:#1a3a5c">
+                    <i class="bi bi-display me-1"></i> Presentation – matplotlib / seaborn / Flask Dashboard
+                </div>
+                <div class="arch-layer" style="background:#2d1a4e">
+                    <i class="bi bi-cpu me-1"></i> Analysis – scipy (t-tests) + Spark MLlib (Random Forest)
+                </div>
+                <div class="arch-layer" style="background:#1a4a3a">
+                    <i class="bi bi-gear me-1"></i> Processing – Spark SQL + ML Pipeline + Scala UDFs
+                </div>
+                <div class="arch-layer" style="background:#4a3a1a">
+                    <i class="bi bi-table me-1"></i> Schema – Apache Hive (DDL, views, queries)
+                </div>
+                <div class="arch-layer" style="background:#3a1a2a">
+                    <i class="bi bi-broadcast me-1"></i> Streaming – Apache Kafka (real-time simulation)
+                </div>
+                <div class="arch-layer" style="background:#1a2a3a">
+                    <i class="bi bi-hdd-stack me-1"></i> Storage – Hadoop HDFS + Parquet (Snappy)
+                </div>
+                <div class="arch-layer" style="background:#2a2a2a">
+                    <i class="bi bi-box me-1"></i> Infrastructure – Docker (9 containers)
+                </div>
+                <hr class="border-secondary my-2">
+                <div class="d-flex flex-wrap gap-1 justify-content-center">
+                    <span class="badge bg-primary">Spark 4.1.1</span>
+                    <span class="badge bg-success">Scala 2.13</span>
+                    <span class="badge bg-info text-dark">Hive 4.0</span>
+                    <span class="badge bg-warning text-dark">Kafka 7.6</span>
+                    <span class="badge bg-danger">HDFS 3.2</span>
+                    <span class="badge bg-secondary">Python 3.12</span>
+                    <span class="badge bg-dark border border-secondary">Docker</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ ROW 5: PIPELINE CHARTS (generated PNGs) ═══ -->
+{% if data.charts %}
+<div class="row g-3 mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-images me-2"></i>Pipeline Visualizations
+                <span class="badge bg-secondary ms-2">{{ data.charts|length }} charts</span>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-pills mb-3" id="chartTabs">
+                    {% for chart in data.charts %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if loop.first %}active{% endif %}" 
+                           data-bs-toggle="pill" href="#chart{{ loop.index }}">
+                            {{ chart.replace('.png','').replace('_',' ').title() }}
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <div class="tab-content">
+                    {% for chart in data.charts %}
+                    <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="chart{{ loop.index }}">
+                        <div class="text-center">
+                            <img src="/charts/{{ chart }}" class="img-fluid rounded" 
+                                 style="max-height:500px" alt="{{ chart }}">
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+</div><!-- container -->
+
+<footer class="text-center py-3">
+    NYC Taxi Fairness Audit &middot; Big Data Analytics – Semester 6 &middot;
+    Spark &middot; Hive &middot; Kafka &middot; HDFS &middot; Scala &middot; Python
+</footer>
+
+<!-- ═══ SCRIPTS ═══ -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ── Pipeline Data (injected from Flask) ──
+const biasData    = {{ data.bias_summary | tojson }};
+const boroughData = {{ data.borough_bias | tojson }};
+const fairnessReport = {{ data.fairness_report | tojson }};
+
+// ── Clock ──
+function updateClock() {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════
+//  CHART 1: Overcharge by Income Category
+// ═══════════════════════════════════════════════
+const incomeLabels = biasData.map(r => (r.income_category || '').charAt(0).toUpperCase() + (r.income_category || '').slice(1));
+const baselineOvercharge = biasData.map(r => parseFloat(r.baseline_overcharge_pct || r.overcharge_pct || 0));
+const fairOvercharge = biasData.map(r => parseFloat(r.fair_overcharge_pct || 0));
+
+new Chart(document.getElementById('biasIncomeChart'), {
+    type: 'bar',
+    data: {
+        labels: incomeLabels,
+        datasets: [
+            { label: 'Baseline', data: baselineOvercharge, backgroundColor: '#f8514980', borderColor: '#f85149', borderWidth: 2 },
+            { label: 'Fair Model', data: fairOvercharge, backgroundColor: '#3fb95080', borderColor: '#3fb950', borderWidth: 2 }
+        ]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#c9d1d9', font: {size:11} } } },
+        scales: {
+            x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+            y: { ticks: { color: '#8b949e', callback: v => v+'%' }, grid: { color: '#21262d' },
+                 title: { display: true, text: 'Overcharge %', color: '#8b949e' } }
+        }
+    }
+});
+
+// ═══════════════════════════════════════════════
+//  CHART 2: Borough Bias
+// ═══════════════════════════════════════════════
+const boroughLabels = boroughData.map(r => r.borough);
+const boroughColors = boroughLabels.map(b => {
+    const m = {Manhattan:'#6f42c1',Brooklyn:'#0dcaf0',Queens:'#ffc107',Bronx:'#dc3545','Staten Island':'#6c757d'};
+    return m[b] || '#8b949e';
+});
+
+new Chart(document.getElementById('boroughBiasChart'), {
+    type: 'doughnut',
+    data: {
+        labels: boroughLabels,
+        datasets: [{
+            data: boroughData.map(r => parseInt(r.trip_count)),
+            backgroundColor: boroughColors.map(c => c + '80'),
+            borderColor: boroughColors,
+            borderWidth: 2
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', labels: { color: '#c9d1d9', font: {size:11}, padding: 8 } },
+            tooltip: {
+                callbacks: {
+                    afterLabel: function(ctx) {
+                        const row = boroughData[ctx.dataIndex];
+                        return `Baseline: ${row.baseline_overcharge_pct}%\nFair: ${row.fair_overcharge_pct}%`;
+                    }
+                }
+            }
+        }
+    }
+});
+
+// ═══════════════════════════════════════════════
+//  CHART 3: Fairness Radar
+// ═══════════════════════════════════════════════
+if (fairnessReport) {
+    const bl = fairnessReport.baseline_model;
+    const fm = fairnessReport.fair_model;
+    new Chart(document.getElementById('fairnessRadar'), {
+        type: 'radar',
+        data: {
+            labels: ['Demographic\nParity', 'Equalized\nOdds', 'Individual\nFairness'],
+            datasets: [
+                {
+                    label: 'Baseline', data: [bl.demographic_parity.score, bl.equalized_odds.score, bl.individual_fairness.score],
+                    borderColor: '#f85149', backgroundColor: '#f8514920', pointBackgroundColor: '#f85149'
+                },
+                {
+                    label: 'Fair Model', data: [fm.demographic_parity.score, fm.equalized_odds.score, fm.individual_fairness.score],
+                    borderColor: '#3fb950', backgroundColor: '#3fb95020', pointBackgroundColor: '#3fb950'
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { r: { angleLines: { color: '#30363d' }, grid: { color: '#30363d' },
+                          pointLabels: { color: '#c9d1d9', font: {size:10} },
+                          ticks: { display: false } } },
+            plugins: { legend: { labels: { color: '#c9d1d9', font:{size:11} } } }
+        }
+    });
+}
+
+// ═══════════════════════════════════════════════
+//  CHART 4: Model Accuracy Comparison
+// ═══════════════════════════════════════════════
+new Chart(document.getElementById('modelCompareChart'), {
+    type: 'bar',
+    data: {
+        labels: ['R²', 'RMSE', 'MAE'],
+        datasets: [
+            { label: 'Baseline', data: [94.85, 2.23, 0.67], backgroundColor: '#f8514960', borderColor: '#f85149', borderWidth: 2 },
+            { label: 'Fair', data: [94.82, 2.24, 0.66], backgroundColor: '#3fb95060', borderColor: '#3fb950', borderWidth: 2 }
+        ]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#c9d1d9', font:{size:11} } } },
+        scales: {
+            x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+            y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }
+        }
+    }
+});
+
+// ═══════════════════════════════════════════════
+//  CHART 5: Live Borough Distribution (Kafka)
+// ═══════════════════════════════════════════════
+const liveCtx = document.getElementById('boroughLiveChart');
+const liveBoroughChart = new Chart(liveCtx, {
+    type: 'bar',
+    data: {
+        labels: ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island', 'Unknown'],
+        datasets: [{
+            label: 'Kafka Messages',
+            data: [0, 0, 0, 0, 0, 0],
+            backgroundColor: ['#6f42c180','#0dcaf080','#ffc10780','#dc354580','#6c757d80','#48505880'],
+            borderColor: ['#6f42c1','#0dcaf0','#ffc107','#dc3545','#6c757d','#484f58'],
+            borderWidth: 2
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+            y: { ticks: { color: '#c9d1d9', font:{size:11} }, grid: { display: false } }
+        }
+    }
+});
+
+// ═══════════════════════════════════════════════
+//  KAFKA SSE (Server-Sent Events)
+// ═══════════════════════════════════════════════
+let evtSource = null;
+
+function connectSSE() {
+    if (evtSource) evtSource.close();
+    evtSource = new EventSource('/api/kafka/stream');
+
+    evtSource.onmessage = function(e) {
+        const d = JSON.parse(e.data);
+
+        // Update KPIs
+        document.getElementById('kafkaMsgCount').textContent = d.messages_consumed.toLocaleString();
+        document.getElementById('kafkaRate').textContent = d.messages_per_sec + ' msg/s';
+        document.getElementById('consumed').textContent = d.messages_consumed.toLocaleString();
+
+        // Producer stats
+        document.getElementById('prodSent').textContent = d.producer.sent.toLocaleString();
+        document.getElementById('prodRate').textContent = d.producer.rate;
+        document.getElementById('prodErrors').textContent = d.producer.errors;
+
+        // Kafka status badge
+        const dot = document.getElementById('kafkaDot');
+        const badge = document.getElementById('kafkaStatus');
+        if (d.connected) {
+            dot.className = 'live-dot on';
+            badge.className = 'badge bg-success';
+            badge.innerHTML = '<span class="live-dot on"></span>Kafka: Connected';
+        } else {
+            dot.className = 'live-dot off';
+            badge.className = 'badge bg-secondary';
+            badge.innerHTML = '<span class="live-dot off"></span>Kafka: Disconnected';
+        }
+
+        // Producer button state
+        if (d.producer.running) {
+            document.getElementById('btnStartProducer').disabled = true;
+            document.getElementById('btnStopProducer').disabled = false;
+        } else {
+            document.getElementById('btnStartProducer').disabled = false;
+            document.getElementById('btnStopProducer').disabled = true;
+        }
+
+        // Live borough chart
+        const boroughOrder = ['Manhattan','Brooklyn','Queens','Bronx','Staten Island','Unknown'];
+        const counts = boroughOrder.map(b => d.borough_counts[b] || 0);
+        liveBoroughChart.data.datasets[0].data = counts;
+        liveBoroughChart.update('none');
+
+        // Live trip feed
+        if (d.recent_trips && d.recent_trips.length > 0) {
+            document.getElementById('feedBadge').style.display = '';
+            const tbody = document.getElementById('tripFeedBody');
+            let html = '';
+            d.recent_trips.reverse().forEach(t => {
+                const time = t.pickup ? t.pickup.substring(11, 19) : '--';
+                const fare = t.fare ? '$' + parseFloat(t.fare).toFixed(2) : '--';
+                const dist = t.distance ? parseFloat(t.distance).toFixed(1) + ' mi' : '--';
+                html += `<tr><td>${time}</td><td>${fare}</td><td>${dist}</td><td>${t.passengers||'--'}</td><td>${t.borough||'--'}</td></tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+    };
+
+    evtSource.onerror = function() {
+        document.getElementById('kafkaStatus').innerHTML = '<span class="live-dot off"></span>SSE: Reconnecting...';
+    };
+}
+connectSSE();
+
+// ═══════════════════════════════════════════════
+//  PRODUCER CONTROL
+// ═══════════════════════════════════════════════
+function startProducer() {
+    const rate = parseInt(document.getElementById('producerRate').value) || 500;
+    const limit = parseInt(document.getElementById('producerLimit').value) || 5000;
+    fetch('/api/kafka/start-producer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ rate, limit })
+    }).then(r => r.json()).then(d => {
+        if (d.error) alert(d.error);
+    });
+}
+
+function stopProducer() {
+    fetch('/api/kafka/stop-producer', { method: 'POST' }).then(r => r.json());
+}
+</script>
+</body>
+</html>
