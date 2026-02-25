@@ -260,25 +260,35 @@ def get_borough(lat, lon):
 
 
 def kafka_consumer_loop():
-    """Background thread: consume messages and update live stats."""
+    """Background thread: consume messages and update live stats.
+    Auto-retries connection every 5 s until Kafka is available."""
     global kafka_stats
     if not KAFKA_AVAILABLE:
         return
 
-    try:
-        consumer = KafkaConsumer(
-            KAFKA_TOPIC,
-            bootstrap_servers=KAFKA_BOOTSTRAP,
-            group_id="dashboard-consumer",
-            auto_offset_reset="latest",
-            enable_auto_commit=True,
-            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-            consumer_timeout_ms=2000,
-            max_poll_records=100,
-        )
-    except Exception:
-        with kafka_lock:
-            kafka_stats["connected"] = False
+    consumer = None
+    while not stop_consumer.is_set():
+        try:
+            consumer = KafkaConsumer(
+                KAFKA_TOPIC,
+                bootstrap_servers=KAFKA_BOOTSTRAP,
+                group_id="dashboard-consumer",
+                auto_offset_reset="latest",
+                enable_auto_commit=True,
+                value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+                consumer_timeout_ms=2000,
+                max_poll_records=100,
+            )
+            break  # connected – exit retry loop
+        except Exception:
+            with kafka_lock:
+                kafka_stats["connected"] = False
+            for _ in range(5):          # wait 5 s in 1-s increments
+                if stop_consumer.is_set():
+                    return
+                time.sleep(1)
+
+    if stop_consumer.is_set() or consumer is None:
         return
 
     with kafka_lock:
