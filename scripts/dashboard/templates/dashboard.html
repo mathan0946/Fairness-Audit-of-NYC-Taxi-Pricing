@@ -398,6 +398,32 @@
         .text-cyan { color: var(--cyan) !important; }
         .text-muted { color: var(--text-3) !important; }
 
+        /* ═══ TOAST ═══ */
+        .toast-container {
+            position: fixed; top: 68px; right: 1.5rem; z-index: 200;
+            display: flex; flex-direction: column; gap: .5rem;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: auto;
+            display: flex; align-items: center; gap: .6rem;
+            padding: .65rem 1rem;
+            border-radius: var(--radius-sm);
+            font-size: .82rem; font-weight: 500;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 24px rgba(0,0,0,.35);
+            animation: toastIn .25s ease;
+            max-width: 420px;
+        }
+        .toast.t-error  { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #fca5a5; }
+        .toast.t-success { background: rgba(16,185,129,.15); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+        .toast .t-close {
+            margin-left: auto; cursor: pointer; opacity: .5;
+            background: none; border: none; color: inherit; font-size: 1rem;
+        }
+        .toast .t-close:hover { opacity: 1; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+
         /* ═══ FOOTER ═══ */
         footer {
             text-align: center; padding: 1.5rem;
@@ -455,6 +481,9 @@
         </div>
     </div>
 </header>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
 
 <div class="main">
 
@@ -931,6 +960,23 @@ Chart.defaults.color = '#94a3b8';
 Chart.defaults.borderColor = 'rgba(148,163,184,0.06)';
 Chart.defaults.font.family = "'Inter', sans-serif";
 
+// ─── Toast helpers ───
+let _toastTimer = null;
+function showToast(msg, type) {
+    hideToast();
+    const el = document.createElement('div');
+    el.className = 'toast t-' + (type || 'error');
+    el.innerHTML = '<i class="bi ' + (type === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill') + '"></i>' +
+                   '<span>' + msg + '</span>' +
+                   '<button class="t-close" onclick="hideToast()">&times;</button>';
+    document.getElementById('toastContainer').appendChild(el);
+    _toastTimer = setTimeout(hideToast, type === 'success' ? 5000 : 10000);
+}
+function hideToast() {
+    clearTimeout(_toastTimer);
+    document.getElementById('toastContainer').innerHTML = '';
+}
+
 // ─── Pipeline data (injected by Flask) ───
 const biasData       = {{ data.bias_summary | tojson }};
 const boroughData    = {{ data.borough_bias | tojson }};
@@ -1140,11 +1186,14 @@ function connectSSE() {
             btnStart.innerHTML  = '<i class="bi bi-broadcast"></i> Running\u2026';
             btnStop.disabled    = false;
             btnStop.innerHTML   = '<i class="bi bi-stop-fill"></i> Stop';
+            hideToast();
         } else {
             btnStart.disabled   = false;
             btnStart.innerHTML  = '<i class="bi bi-play-fill"></i> Start Streaming';
             btnStop.disabled    = true;
             btnStop.innerHTML   = '<i class="bi bi-stop-fill"></i> Stop';
+            /* Show error if producer died with an error */
+            if (d.producer.last_error) showToast(d.producer.last_error, 'error');
         }
 
         /* ── Live borough chart ── */
@@ -1180,6 +1229,7 @@ connectSSE();
 async function startProducer() {
     const btnStart = document.getElementById('btnStart');
     const btnStop  = document.getElementById('btnStop');
+    hideToast();
     btnStart.disabled  = true;
     btnStart.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting\u2026';
     btnStop.disabled   = true;
@@ -1194,14 +1244,16 @@ async function startProducer() {
             })
         });
         const data = await resp.json();
-        if (data.error) {
-            alert(data.error);
+        if (!resp.ok || data.error) {
+            showToast(data.error || 'Failed to start producer', 'error');
             btnStart.disabled  = false;
             btnStart.innerHTML = '<i class="bi bi-play-fill"></i> Start Streaming';
+        } else {
+            showToast('Producer started – streaming ' + (data.limit||'all') + ' msgs at ' + data.rate + ' msg/s', 'success');
         }
-        // SSE will take over button state
+        // SSE will take over button state from here
     } catch (err) {
-        alert('Failed to start producer: ' + err);
+        showToast('Network error: ' + err, 'error');
         btnStart.disabled  = false;
         btnStart.innerHTML = '<i class="bi bi-play-fill"></i> Start Streaming';
     }

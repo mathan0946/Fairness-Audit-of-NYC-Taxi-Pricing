@@ -81,6 +81,7 @@ producer_stats = {
     "rate": 0,
     "errors": 0,
     "target_limit": 0,
+    "last_error": "",
 }
 
 
@@ -393,11 +394,28 @@ FLOATS = {
 }
 
 
+def check_kafka_connectivity(timeout_ms=4000):
+    """Quick check: can we reach the Kafka broker?"""
+    if not KAFKA_AVAILABLE:
+        return False, "kafka-python not installed"
+    import socket
+    host_port = KAFKA_BOOTSTRAP.split(",")[0].strip()
+    host, _, port = host_port.partition(":")
+    port = int(port) if port else 9092
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout_ms / 1000)
+        sock.close()
+        return True, ""
+    except Exception as e:
+        return False, f"Cannot reach Kafka at {host}:{port} – {e}"
+
+
 def kafka_producer_loop(csv_path, rate, limit):
     """Background thread: stream CSV rows to Kafka."""
     if not KAFKA_AVAILABLE:
         with producer_lock:
             producer_stats["running"] = False
+            producer_stats["last_error"] = "kafka-python not installed"
         return
 
     try:
@@ -405,10 +423,12 @@ def kafka_producer_loop(csv_path, rate, limit):
             bootstrap_servers=KAFKA_BOOTSTRAP,
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             acks="all", retries=3, batch_size=16384, linger_ms=10,
+            request_timeout_ms=5000, max_block_ms=5000,
         )
-    except Exception:
+    except Exception as e:
         with producer_lock:
             producer_stats["running"] = False
+            producer_stats["last_error"] = f"Kafka connection failed: {e}"
         return
 
     delay = 1.0 / rate if rate > 0 else 0
@@ -537,6 +557,11 @@ def api_start_producer():
     if not os.path.exists(csv_path):
         return jsonify({"error": f"CSV not found: {csv_path}"}), 404
 
+    # Pre-flight: check Kafka is reachable
+    reachable, reason = check_kafka_connectivity(timeout_ms=3000)
+    if not reachable:
+        return jsonify({"error": f"Kafka broker not reachable. {reason}"}), 503
+
     # Reset producer state
     stop_producer.clear()
     with producer_lock:
@@ -545,6 +570,7 @@ def api_start_producer():
         producer_stats["errors"] = 0
         producer_stats["rate"] = 0
         producer_stats["target_limit"] = limit
+        producer_stats["last_error"] = ""
 
     producer_thread = threading.Thread(
         target=kafka_producer_loop, args=(csv_path, rate, limit), daemon=True,
