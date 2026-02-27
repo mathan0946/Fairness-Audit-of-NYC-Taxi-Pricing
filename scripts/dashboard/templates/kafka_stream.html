@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kafka Live Stream — NYC Taxi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Base ────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:       #0a0a0f;
+      --surface:  #111118;
+      --border:   #1e1e2a;
+      --muted:    #71717a;
+      --text:     #e4e4e7;
+      --heading:  #fafafa;
+      --accent:   #818cf8;
+      --accent2:  #6366f1;
+      --green:    #34d399;
+      --green-bg: rgba(52,211,153,.12);
+      --red:      #f87171;
+      --red-bg:   rgba(248,113,113,.12);
+      --yellow:   #fbbf24;
+      --yellow-bg:rgba(251,191,36,.10);
+      --blue:     #60a5fa;
+      --radius:   12px;
+    }
+    html { font-size: 15px; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Top Bar ─────────────────────────────────────────── */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky; top: 0; z-index: 50;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 14px; }
+    .topbar-logo {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      display: grid; place-items: center; font-weight: 700; font-size: 16px; color: #fff;
+    }
+    .topbar h1 { font-size: 1.15rem; font-weight: 600; color: var(--heading); }
+    .topbar h1 span { color: var(--muted); font-weight: 400; font-size: .85rem; margin-left: 8px; }
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 14px; border-radius: 999px; font-size: .78rem; font-weight: 500;
+    }
+    .status-pill.ok   { background: var(--green-bg); color: var(--green); }
+    .status-pill.off  { background: var(--red-bg);   color: var(--red);   }
+    .status-pill.wait { background: var(--yellow-bg); color: var(--yellow); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .dot.ok   { background: var(--green); }
+    .dot.off  { background: var(--red); }
+    .dot.wait { background: var(--yellow); animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.35} }
+    #clock { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ── Layout ──────────────────────────────────────────── */
+    .container { max-width: 1320px; margin: 0 auto; padding: 28px 32px 48px; }
+
+    /* ── KPI Row ─────────────────────────────────────────── */
+    .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 20px 22px; display: flex; flex-direction: column; gap: 4px;
+    }
+    .kpi-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .kpi-value { font-size: 1.65rem; font-weight: 700; color: var(--heading); font-variant-numeric: tabular-nums; }
+    .kpi-sub   { font-size: .78rem; color: var(--muted); }
+
+    /* ── Cards ────────────────────────────────────────────── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 24px; margin-bottom: 20px;
+    }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .card-title  { font-size: 1rem; font-weight: 600; color: var(--heading); }
+
+    /* ── Controls ─────────────────────────────────────────── */
+    .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .field input, .field select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; color: var(--text); font-size: .88rem; width: 140px;
+      outline: none; transition: border-color .2s;
+    }
+    .field input:focus, .field select:focus { border-color: var(--accent); }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 9px 20px; border-radius: 8px; font-size: .85rem; font-weight: 500;
+      border: none; cursor: pointer; transition: all .15s;
+    }
+    .btn-primary { background: var(--accent2); color: #fff; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-danger  { background: rgba(248,113,113,.15); color: var(--red); }
+    .btn-danger:hover  { background: rgba(248,113,113,.25); }
+    .btn-ghost   { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover   { color: var(--text); border-color: var(--muted); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Two-col layout ──────────────────────────────────── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* ── Borough Chart ───────────────────────────────────── */
+    .borough-bar { margin-bottom: 10px; }
+    .borough-bar .bar-label {
+      display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: 3px;
+    }
+    .borough-bar .bar-label span:first-child { color: var(--text); }
+    .borough-bar .bar-label span:last-child  { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .bar-track {
+      height: 22px; background: var(--bg); border-radius: 6px; overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%; border-radius: 6px; transition: width .5s ease;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+    }
+
+    /* ── Trip Feed ────────────────────────────────────────── */
+    .feed { max-height: 380px; overflow-y: auto; }
+    .feed::-webkit-scrollbar { width: 5px; }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .trip-row {
+      display: grid; grid-template-columns: 90px 100px 80px 1fr;
+      gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: .82rem; align-items: center;
+    }
+    .trip-row:last-child { border-bottom: none; }
+    .trip-borough {
+      display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: .72rem;
+      font-weight: 500; background: rgba(99,102,241,.12); color: var(--accent);
+    }
+    .trip-fare   { color: var(--green); font-weight: 600; }
+    .trip-dist   { color: var(--muted); }
+    .trip-time   { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ── Toast ────────────────────────────────────────────── */
+    .toast-area { position: fixed; top: 80px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+    .toast {
+      padding: 12px 20px; border-radius: 10px; font-size: .84rem; font-weight: 500;
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      animation: slideIn .25s ease;
+    }
+    .toast.success { border-color: var(--green); color: var(--green); }
+    .toast.error   { border-color: var(--red);   color: var(--red); }
+    @keyframes slideIn { from {opacity:0;transform:translateX(30px)} to {opacity:1;transform:translateX(0)} }
+
+    /* ── Empty state ─────────────────────────────────────── */
+    .empty {
+      text-align: center; padding: 48px 20px; color: var(--muted);
+    }
+    .empty svg { width: 48px; height: 48px; opacity: .35; margin-bottom: 12px; }
+    .empty p { font-size: .9rem; }
+
+    /* ── Log ──────────────────────────────────────────────── */
+    .log-area {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px; max-height: 180px; overflow-y: auto; font-family: 'Courier New', monospace;
+      font-size: .78rem; color: var(--muted); line-height: 1.7;
+    }
+    .log-area .log-info  { color: var(--blue); }
+    .log-area .log-ok    { color: var(--green); }
+    .log-area .log-err   { color: var(--red); }
+  </style>
+</head>
+<body>
+  <!-- ══════════ TOP BAR ══════════ -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">K</div>
+      <h1>Kafka Live Stream <span>NYC Taxi Fairness Audit</span></h1>
+    </div>
+    <div class="topbar-right">
+      <span id="kafkaStatus" class="status-pill off">
+        <span class="dot off"></span> Disconnected
+      </span>
+      <span id="clock"></span>
+    </div>
+  </header>
+
+  <div class="toast-area" id="toastArea"></div>
+
+  <!-- ══════════ MAIN ══════════ -->
+  <div class="container">
+
+    <!-- KPIs -->
+    <div class="kpi-row">
+      <div class="kpi">
+        <span class="kpi-label">Messages Consumed</span>
+        <span class="kpi-value" id="kpiConsumed">0</span>
+        <span class="kpi-sub">from topic <b>taxi-trips-raw</b></span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Throughput</span>
+        <span class="kpi-value" id="kpiRate">0 <small style="font-size:.55em;color:var(--muted)">msg/s</small></span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Producer Sent</span>
+        <span class="kpi-value" id="kpiSent">0</span>
+        <span class="kpi-sub" id="kpiSentSub">idle</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Total Fare</span>
+        <span class="kpi-value" id="kpiFare">$0</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Total Distance</span>
+        <span class="kpi-value" id="kpiDist">0 <small style="font-size:.55em;color:var(--muted)">mi</small></span>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Producer Controls</span>
+        <span id="producerBadge" class="status-pill off" style="font-size:.72rem">
+          <span class="dot off"></span> Stopped
+        </span>
+      </div>
+      <div class="controls">
+        <div class="field">
+          <label>Messages / sec</label>
+          <input type="number" id="inputRate" value="500" min="1" max="10000" />
+        </div>
+        <div class="field">
+          <label>Total Limit</label>
+          <input type="number" id="inputLimit" value="5000" min="0" />
+        </div>
+        <div class="field">
+          <label>CSV Source</label>
+          <select id="inputCsv">
+            <option value="data/yellow_tripdata_2016-01.csv">2016-01</option>
+            <option value="data/yellow_tripdata_2016-02.csv">2016-02</option>
+            <option value="data/yellow_tripdata_2016-03.csv">2016-03</option>
+            <option value="data/yellow_tripdata_2015-01.csv">2015-01</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btnStart" onclick="startProducer()">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Start
+        </button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopProducer()" disabled>
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+          Stop
+        </button>
+        <button class="btn btn-ghost" onclick="resetStats()">Reset</button>
+      </div>
+    </div>
+
+    <!-- Two-column: Borough Distribution + Live Feed -->
+    <div class="grid-2">
+
+      <!-- Borough Distribution -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Borough Distribution</span>
+          <span style="font-size:.75rem;color:var(--muted)" id="boroughTotal">0 trips</span>
+        </div>
+        <div id="boroughBars">
+          <div class="empty">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4"/></svg>
+            <p>Start the producer to see borough data</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Trip Feed -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Live Trip Feed</span>
+          <span style="font-size:.75rem;color:var(--muted)" id="feedLabel">last 5 trips</span>
+        </div>
+        <div class="feed" id="tripFeed">
+          <div class="empty">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            <p>Waiting for trip messages…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Event Log -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Event Log</span>
+        <button class="btn btn-ghost" style="padding:5px 12px;font-size:.75rem" onclick="clearLog()">Clear</button>
+      </div>
+      <div class="log-area" id="logArea">
+        <div class="log-info">Dashboard loaded – waiting for SSE connection…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ JAVASCRIPT ══════════ -->
+  <script>
+    /* ── Helpers ─────────────────────────────────────────── */
+    const $ = s => document.getElementById(s);
+    const fmt = n => Number(n).toLocaleString();
+    const fmtMoney = n => '$' + Number(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    /* ── Clock ───────────────────────────────────────────── */
+    setInterval(() => {
+      $('clock').textContent = new Date().toLocaleTimeString();
+    }, 1000);
+    $('clock').textContent = new Date().toLocaleTimeString();
+
+    /* ── Toast ───────────────────────────────────────────── */
+    function toast(msg, type = '') {
+      const t = document.createElement('div');
+      t.className = 'toast ' + type;
+      t.textContent = msg;
+      $('toastArea').appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+    }
+
+    /* ── Log ─────────────────────────────────────────────── */
+    function addLog(msg, cls = 'log-info') {
+      const ts = new Date().toLocaleTimeString();
+      const el = $('logArea');
+      const line = document.createElement('div');
+      line.className = cls;
+      line.textContent = `[${ts}] ${msg}`;
+      el.appendChild(line);
+      el.scrollTop = el.scrollHeight;
+      // Keep last 80 lines
+      while (el.children.length > 80) el.removeChild(el.firstChild);
+    }
+    function clearLog() { $('logArea').innerHTML = ''; }
+
+    /* ── Borough Colors ──────────────────────────────────── */
+    const boroughColors = {
+      Manhattan:      '#818cf8',
+      Brooklyn:       '#60a5fa',
+      Queens:         '#34d399',
+      Bronx:          '#fbbf24',
+      'Staten Island':'#f87171',
+      Unknown:        '#71717a',
+    };
+
+    /* ── Render Borough Bars ─────────────────────────────── */
+    function renderBoroughs(counts) {
+      const entries = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+      if (!entries.length) return;
+      const max = entries[0][1];
+      const total = entries.reduce((s,e) => s + e[1], 0);
+      $('boroughTotal').textContent = fmt(total) + ' trips';
+      $('boroughBars').innerHTML = entries.map(([name, count]) => `
+        <div class="borough-bar">
+          <div class="bar-label">
+            <span>${name}</span>
+            <span>${fmt(count)} (${(count/total*100).toFixed(1)}%)</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${(count/max*100).toFixed(1)}%;background:${boroughColors[name]||'var(--accent)'}"></div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    /* ── Render Trips ────────────────────────────────────── */
+    function renderTrips(trips) {
+      if (!trips || !trips.length) return;
+      $('tripFeed').innerHTML = trips.slice().reverse().map(t => `
+        <div class="trip-row">
+          <span class="trip-time">${t.pickup_time || '—'}</span>
+          <span class="trip-borough">${t.borough || 'Unknown'}</span>
+          <span class="trip-fare">${fmtMoney(t.fare || 0)}</span>
+          <span class="trip-dist">${Number(t.distance || 0).toFixed(1)} mi · ${t.passengers || '?'} pax</span>
+        </div>
+      `).join('');
+    }
+
+    /* ── Status Pill ─────────────────────────────────────── */
+    function setKafkaStatus(connected, consumerRunning) {
+      const el = $('kafkaStatus');
+      if (connected && consumerRunning) {
+        el.className = 'status-pill ok';
+        el.innerHTML = '<span class="dot ok"></span> Connected';
+      } else if (consumerRunning) {
+        el.className = 'status-pill wait';
+        el.innerHTML = '<span class="dot wait"></span> Connecting…';
+      } else {
+        el.className = 'status-pill off';
+        el.innerHTML = '<span class="dot off"></span> Disconnected';
+      }
+    }
+
+    function setProducerStatus(running) {
+      const el = $('producerBadge');
+      if (running) {
+        el.className = 'status-pill ok';
+        el.innerHTML = '<span class="dot ok"></span> Running';
+      } else {
+        el.className = 'status-pill off';
+        el.innerHTML = '<span class="dot off"></span> Stopped';
+      }
+      $('btnStart').disabled = running;
+      $('btnStop').disabled  = !running;
+    }
+
+    /* ── SSE ─────────────────────────────────────────────── */
+    let evtSource = null;
+    let reconnectTimer = null;
+
+    function connectSSE() {
+      if (evtSource) { evtSource.close(); evtSource = null; }
+      evtSource = new EventSource('/api/kafka/stream');
+
+      evtSource.onopen = () => {
+        addLog('SSE connected', 'log-ok');
+      };
+
+      evtSource.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          // KPIs
+          $('kpiConsumed').textContent = fmt(d.messages_consumed);
+          $('kpiRate').innerHTML = fmt(d.messages_per_sec) + ' <small style="font-size:.55em;color:var(--muted)">msg/s</small>';
+          $('kpiFare').textContent = fmtMoney(d.fare_sum);
+          $('kpiDist').innerHTML = fmt(Math.round(d.distance_sum)) + ' <small style="font-size:.55em;color:var(--muted)">mi</small>';
+
+          // Producer
+          const p = d.producer || {};
+          $('kpiSent').textContent = fmt(p.sent || 0);
+          const subParts = [];
+          if (p.running) subParts.push(fmt(p.rate || 0) + ' msg/s');
+          if (p.target_limit) subParts.push('limit ' + fmt(p.target_limit));
+          if (p.errors) subParts.push(p.errors + ' errors');
+          $('kpiSentSub').textContent = subParts.length ? subParts.join(' · ') : (p.sent > 0 ? 'done' : 'idle');
+          setProducerStatus(!!p.running);
+
+          // Status
+          setKafkaStatus(d.connected, d.consumer_running);
+
+          // Borough bars
+          if (d.borough_counts && Object.keys(d.borough_counts).length) renderBoroughs(d.borough_counts);
+
+          // Trips
+          if (d.recent_trips && d.recent_trips.length) renderTrips(d.recent_trips);
+        } catch (_) {}
+      };
+
+      evtSource.onerror = () => {
+        addLog('SSE disconnected – retrying in 3s…', 'log-err');
+        evtSource.close();
+        evtSource = null;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectSSE, 3000);
+      };
+    }
+    connectSSE();
+
+    /* ── Producer API ────────────────────────────────────── */
+    async function startProducer() {
+      const rate  = parseInt($('inputRate').value)  || 500;
+      const limit = parseInt($('inputLimit').value) || 5000;
+      const csv   = $('inputCsv').value;
+      $('btnStart').disabled = true;
+      addLog(`Starting producer: rate=${rate}, limit=${limit}, csv=${csv}`);
+
+      try {
+        const r = await fetch('/api/kafka/start-producer', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({rate, limit, csv})
+        });
+        const j = await r.json();
+        if (r.ok) {
+          toast('Producer started', 'success');
+          addLog(`Producer started – target ${fmt(limit)} messages`, 'log-ok');
+        } else {
+          toast(j.error || 'Failed', 'error');
+          addLog('Producer start failed: ' + (j.error || 'unknown'), 'log-err');
+          $('btnStart').disabled = false;
+        }
+      } catch (e) {
+        toast('Network error', 'error');
+        addLog('Network error: ' + e.message, 'log-err');
+        $('btnStart').disabled = false;
+      }
+    }
+
+    async function stopProducer() {
+      addLog('Stopping producer…');
+      try {
+        await fetch('/api/kafka/stop-producer', {method:'POST'});
+        toast('Producer stopped', 'success');
+        addLog('Producer stopped', 'log-ok');
+      } catch (e) {
+        toast('Network error', 'error');
+      }
+    }
+
+    async function resetStats() {
+      try {
+        await fetch('/api/kafka/reset-stats', {method:'POST'});
+        $('kpiConsumed').textContent = '0';
+        $('kpiRate').innerHTML = '0 <small style="font-size:.55em;color:var(--muted)">msg/s</small>';
+        $('kpiFare').textContent = '$0.00';
+        $('kpiDist').innerHTML = '0 <small style="font-size:.55em;color:var(--muted)">mi</small>';
+        $('boroughBars').innerHTML = '<div class="empty"><p>Start the producer to see borough data</p></div>';
+        $('boroughTotal').textContent = '0 trips';
+        $('tripFeed').innerHTML = '<div class="empty"><p>Waiting for trip messages…</p></div>';
+        toast('Stats reset');
+        addLog('All stats reset', 'log-info');
+      } catch (_) {}
+    }
+  </script>
+</body>
+</html>

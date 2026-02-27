@@ -512,6 +512,12 @@ def index():
                            kafka_available=KAFKA_AVAILABLE)
 
 
+@app.route("/kafka")
+def kafka_dashboard():
+    """Lightweight Kafka-only streaming dashboard."""
+    return render_template("kafka_stream.html")
+
+
 @app.route("/api/results")
 def api_results():
     return jsonify(get_all_data())
